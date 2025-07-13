@@ -6,14 +6,17 @@ substitutions:
   _APP_CONTAINER_NAME: "sample-app-container" # Matches 'name' in deployment.yaml container spec
 
 steps:
+ steps:
   # Step 1: Build the Docker image
   - name: 'gcr.io/cloud-builders/docker'
     args:
       - 'build'
       - '-t'
-      - '${_GCP_REGION}-docker.pkg.dev/${PROJECT_ID}/${_ARTIFACT_REGISTRY_REPO}/${_APP_CONTAINER_NAME}:${_COMMIT_SHA}'
+      # CHANGE THIS LINE:
+      - '${_GCP_REGION}-docker.pkg.dev/${PROJECT_ID}/${_ARTIFACT_REGISTRY_REPO}/${_APP_CONTAINER_NAME}:${_SHORT_SHA}'
+      #                          ^--- FROM _COMMIT_SHA TO _SHORT_SHA
       - '.'
-    dir: '.' # The Directory where the Dockerfile is relative to the checkout (root of sample-app)
+    dir: '.'
 
   # Step 2: Push the Docker image to Artifact Registry
   - name: 'gcr.io/cloud-builders/docker'
@@ -58,5 +61,5 @@ steps:
 options:
   logging: CLOUD_LOGGING_ONLY
 images:
-  - '${_GCP_REGION}-docker.pkg.dev/${PROJECT_ID}/${_ARTIFACT_REGISTRY_REPO}/${_APP_CONTAINER_NAME}:${_COMMIT_SHA}'
+  - '${_GCP_REGION}-docker.pkg.dev/${PROJECT_ID}/${_ARTIFACT_REGISTRY_REPO}/${_APP_CONTAINER_NAME}:${_SHORT_SHA}'
 
