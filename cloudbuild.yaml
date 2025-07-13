@@ -1,0 +1,61 @@
+# Define substitutions for dynamic values. These will be populated by the trigger.
+substitutions:
+  _GKE_CLUSTER_NAME: "ci-cd-sample-cluster"
+  _GKE_CLUSTER_ZONE: "us-central1-c"
+  _ARTIFACT_REGISTRY_REPO: "sample-app-images"
+  _APP_CONTAINER_NAME: "sample-app-container" # Matches 'name' in deployment.yaml container spec
+
+steps:
+  # Step 1: Build the Docker image
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - '${_GCP_REGION}-docker.pkg.dev/${PROJECT_ID}/${_ARTIFACT_REGISTRY_REPO}/${_APP_CONTAINER_NAME}:${_COMMIT_SHA}'
+      - '.'
+    dir: '.' # The Directory where the Dockerfile is relative to the checkout (root of sample-app)
+
+  # Step 2: Push the Docker image to Artifact Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - '${_GCP_REGION}-docker.pkg.dev/${PROJECT_ID}/${_ARTIFACT_REGISTRY_REPO}/${_APP_CONTAINER_NAME}:${_COMMIT_SHA}'
+    dir: '.'
+
+  # Step 3: Get credentials for the GKE cluster
+  - name: 'gcr.io/cloud-builders/gcloud'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        gcloud container clusters get-credentials "${_GKE_CLUSTER_NAME}" \
+          --zone "${_GKE_CLUSTER_ZONE}" \
+          --project="${PROJECT_ID}"
+
+  # Step 4: Deploy Kubernetes Service
+  - name: 'gcr.io/cloud-builders/kubectl'
+    args:
+      - 'apply'
+      - '-f'
+      - 'kubernetes/service.yaml'
+    env:
+      - "CLOUDSDK_CONTAINER_CLUSTER=${_GKE_CLUSTER_NAME}"
+      - "CLOUDSDK_COMPUTE_ZONE=${_GKE_CLUSTER_ZONE}"
+    dir: '.'
+
+  # Step 5: Update the Kubernetes Deployment with the new image
+  - name: 'gcr.io/cloud-builders/kubectl'
+    args:
+      - 'set'
+      - 'image'
+      - 'deployment/sample-app'
+      - '${_APP_CONTAINER_NAME}=${_GCP_REGION}-docker.pkg.dev/${PROJECT_ID}/${_ARTIFACT_REGISTRY_REPO}/${_APP_CONTAINER_NAME}:${_COMMIT_SHA}'
+      - '--record=true'
+    env:
+      - "CLOUDSDK_CONTAINER_CLUSTER=${_GKE_CLUSTER_NAME}"
+      - "CLOUDSDK_COMPUTE_ZONE=${_GKE_CLUSTER_ZONE}"
+    dir: '.'
+
+images:
+  - '${_GCP_REGION}-docker.pkg.dev/${PROJECT_ID}/${_ARTIFACT_REGISTRY_REPO}/${_APP_CONTAINER_NAME}:${_COMMIT_SHA}'
+
