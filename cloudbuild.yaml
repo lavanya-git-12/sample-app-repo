@@ -55,7 +55,8 @@ steps:
       - "CLOUDSDK_CONTAINER_CLUSTER=${_GKE_CLUSTER_NAME}"
       - "CLOUDSDK_COMPUTE_ZONE=${_GKE_CLUSTER_ZONE}"
     dir: '.'
-
+options:
+  logging: CLOUD_LOGGING_ONLY
 images:
   - '${_GCP_REGION}-docker.pkg.dev/${PROJECT_ID}/${_ARTIFACT_REGISTRY_REPO}/${_APP_CONTAINER_NAME}:${_COMMIT_SHA}'
 
