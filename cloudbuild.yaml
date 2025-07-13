@@ -6,17 +6,15 @@ substitutions:
   _APP_CONTAINER_NAME: "sample-app-container" # Matches 'name' in deployment.yaml container spec
 
 steps:
- steps:
   # Step 1: Build the Docker image
+  # Uses the 'docker' Cloud Build builder.
   - name: 'gcr.io/cloud-builders/docker'
     args:
       - 'build'
-      #- '-t'
-      # CHANGE THIS LINE:
+      #- '-t' # Tag the image
       - '${_GCP_REGION}-docker.pkg.dev/${PROJECT_ID}/${_ARTIFACT_REGISTRY_REPO}/${_APP_CONTAINER_NAME}:${_COMMIT_SHA}'
-      #                          ^--- FROM _COMMIT_SHA TO _SHORT_SHA
-      - '.'
-    dir: '.'
+      - '.' # Build context (current directory, which is 'sample-app' repo root)
+    dir: '.' # The Directory where the Dockerfile is relative to the checkout (root of sample-app)
 
   # Step 2: Push the Docker image to Artifact Registry
   - name: 'gcr.io/cloud-builders/docker'
@@ -26,6 +24,7 @@ steps:
     dir: '.'
 
   # Step 3: Get credentials for the GKE cluster
+  # This makes 'kubectl' able to communicate with your GKE cluster.
   - name: 'gcr.io/cloud-builders/gcloud'
     entrypoint: 'bash'
     args:
@@ -35,31 +34,33 @@ steps:
           --zone "${_GKE_CLUSTER_ZONE}" \
           --project="${PROJECT_ID}"
 
-  # Step 4: Deploy Kubernetes Service
+  # Step 4: Deploy Kubernetes Service (if not exists) and ensure it's up-to-date
+  # Use 'apply' which is idempotent (creates if not exists, updates if changed)
   - name: 'gcr.io/cloud-builders/kubectl'
     args:
       - 'apply'
       - '-f'
-      - 'kubernetes/service.yaml'
+      - 'kubernetes/service.yaml' # Path to your service manifest
     env:
       - "CLOUDSDK_CONTAINER_CLUSTER=${_GKE_CLUSTER_NAME}"
       - "CLOUDSDK_COMPUTE_ZONE=${_GKE_CLUSTER_ZONE}"
-    dir: '.'
+    dir: '.' # kubectl works from the repo root
 
   # Step 5: Update the Kubernetes Deployment with the new image
+  # Uses 'set image' to update the container image in the deployment.
   - name: 'gcr.io/cloud-builders/kubectl'
     args:
       - 'set'
       - 'image'
-      - 'deployment/sample-app'
+      - 'deployment/sample-app' # Name of your Deployment from deployment.yaml
       - '${_APP_CONTAINER_NAME}=${_GCP_REGION}-docker.pkg.dev/${PROJECT_ID}/${_ARTIFACT_REGISTRY_REPO}/${_APP_CONTAINER_NAME}:${_COMMIT_SHA}'
-      - '--record=true'
+      - '--record=true' # Keep a record of the change in Deployment history
     env:
       - "CLOUDSDK_CONTAINER_CLUSTER=${_GKE_CLUSTER_NAME}"
       - "CLOUDSDK_COMPUTE_ZONE=${_GKE_CLUSTER_ZONE}"
-    dir: '.'
-options:
-  logging: CLOUD_LOGGING_ONLY
+    dir: '.' # kubectl works from the repo root
+
+# This section lists the images produced by this build (optional, but good practice)
 images:
   - '${_GCP_REGION}-docker.pkg.dev/${PROJECT_ID}/${_ARTIFACT_REGISTRY_REPO}/${_APP_CONTAINER_NAME}:${_COMMIT_SHA}'
 
