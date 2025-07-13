@@ -4,24 +4,27 @@ substitutions:
   _GKE_CLUSTER_ZONE: "us-central1-c"
   _ARTIFACT_REGISTRY_REPO: "sample-app-images"
   _APP_CONTAINER_NAME: "sample-app-container" # Matches 'name' in deployment.yaml container spec
+  _GCP_REGION: "us-central1" # Explicitly define the region for Artifact Registry
 
 steps:
-  # Step 1: Build the Docker image
+  # Step 1: Build the Docker image and tag it
   # Uses the 'docker' Cloud Build builder.
   - name: 'gcr.io/cloud-builders/docker'
     args:
       - 'build'
-      #- '-t' # Tag the image
-      - '${_GCP_REGION}-docker.pkg.dev/${PROJECT_ID}/${_ARTIFACT_REGISTRY_REPO}/${_APP_CONTAINER_NAME}:${_COMMIT_SHA}'
-      - '.' # Build context (current directory, which is 'sample-app' repo root)
-    dir: '.' # The Directory where the Dockerfile is relative to the checkout (root of sample-app)
+      - '-t' # Tag the image
+      - '${_GCP_REGION}-docker.pkg.dev/${PROJECT_ID}/${_ARTIFACT_REGISTRY_REPO}/${_APP_CONTAINER_NAME}:${SHORT_SHA}'
+      - '.' # Build context (current directory)
+    id: 'Build Docker Image'
 
   # Step 2: Push the Docker image to Artifact Registry
+  # This step now depends on the successful completion of the build step.
   - name: 'gcr.io/cloud-builders/docker'
     args:
       - 'push'
-      - '${_GCP_REGION}-docker.pkg.dev/${PROJECT_ID}/${_ARTIFACT_REGISTRY_REPO}/${_APP_CONTAINER_NAME}:${_COMMIT_SHA}'
-    dir: '.'
+      - '${_GCP_REGION}-docker.pkg.dev/${PROJECT_ID}/${_ARTIFACT_REGISTRY_REPO}/${_APP_CONTAINER_NAME}:${SHORT_SHA}'
+    id: 'Push to Artifact Registry'
+    waitFor: ['Build Docker Image']
 
   # Step 3: Get credentials for the GKE cluster
   # This makes 'kubectl' able to communicate with your GKE cluster.
@@ -31,37 +34,40 @@ steps:
       - '-c'
       - |
         gcloud container clusters get-credentials "${_GKE_CLUSTER_NAME}" \
-          --zone "${_GKE_CLUSTER_ZONE}" \
-          --project="${PROJECT_ID}"
+          --zone "${_GKE_CLUSTER_ZONE}"
+    id: 'Get GKE Credentials'
 
-  # Step 4: Deploy Kubernetes Service (if not exists) and ensure it's up-to-date
-  # Use 'apply' which is idempotent (creates if not exists, updates if changed)
+  # Step 4: Deploy Kubernetes Service and Deployment
+  # Use 'apply' which is idempotent. It's often better to manage both service and deployment together.
+  # This assumes your deployment.yaml is updated with the correct image tag placeholder or will be updated.
   - name: 'gcr.io/cloud-builders/kubectl'
     args:
       - 'apply'
       - '-f'
-      - 'kubernetes/service.yaml' # Path to your service manifest
+      - 'kubernetes/' # Apply all manifests in the kubernetes directory
     env:
-      - "CLOUDSDK_CONTAINER_CLUSTER=${_GKE_CLUSTER_NAME}"
-      - "CLOUDSDK_COMPUTE_ZONE=${_GKE_CLUSTER_ZONE}"
-    dir: '.' # kubectl works from the repo root
+      - 'CLOUDSDK_COMPUTE_ZONE=${_GKE_CLUSTER_ZONE}'
+      - 'CLOUDSDK_CONTAINER_CLUSTER=${_GKE_CLUSTER_NAME}'
+    id: 'Deploy to GKE'
+    waitFor: ['Get GKE Credentials']
 
   # Step 5: Update the Kubernetes Deployment with the new image
-  # Uses 'set image' to update the container image in the deployment.
+  # This is a more direct way to ensure the new image is used.
   - name: 'gcr.io/cloud-builders/kubectl'
     args:
       - 'set'
       - 'image'
       - 'deployment/sample-app' # Name of your Deployment from deployment.yaml
-      - '${_APP_CONTAINER_NAME}=${_GCP_REGION}-docker.pkg.dev/${PROJECT_ID}/${_ARTIFACT_REGISTRY_REPO}/${_APP_CONTAINER_NAME}:${_COMMIT_SHA}'
-      - '--record=true' # Keep a record of the change in Deployment history
+      - '${_APP_CONTAINER_NAME}=${_GCP_REGION}-docker.pkg.dev/${PROJECT_ID}/${_ARTIFACT_REGISTRY_REPO}/${_APP_CONTAINER_NAME}:${SHORT_SHA}'
     env:
-      - "CLOUDSDK_CONTAINER_CLUSTER=${_GKE_CLUSTER_NAME}"
-      - "CLOUDSDK_COMPUTE_ZONE=${_GKE_CLUSTER_ZONE}"
-    dir: '.' # kubectl works from the repo root
+      - 'CLOUDSDK_COMPUTE_ZONE=${_GKE_CLUSTER_ZONE}'
+      - 'CLOUDSDK_CONTAINER_CLUSTER=${_GKE_CLUSTER_NAME}'
+    id: 'Update Deployment Image'
+    waitFor: ['Deploy to GKE']
+
+# This section lists the images produced by this build.
+images:
+  - '${_GCP_REGION}-docker.pkg.dev/${PROJECT_ID}/${_ARTIFACT_REGISTRY_REPO}/${_APP_CONTAINER_NAME}:${SHORT_SHA}'
+
 options:
   logging: CLOUD_LOGGING_ONLY
-# This section lists the images produced by this build (optional, but good practice)
-images:
-  - '${_GCP_REGION}-docker.pkg.dev/${PROJECT_ID}/${_ARTIFACT_REGISTRY_REPO}/${_APP_CONTAINER_NAME}:${_COMMIT_SHA}'
-
